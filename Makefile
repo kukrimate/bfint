@@ -1,11 +1,11 @@
-NASM := nasm
-LD   := ld
+NASM	= nasm
+LD		= ld
 
-bfint: string.o errno.o bfint.o
+bfint: src/lib.o src/bfint.o
 	$(LD) -o $@ $^
 
 %.o: %.asm
-	$(NASM) -f elf64 -o $@ $^
+	$(NASM) -I src -f elf64 -o $@ $^
 
 clean:
 	rm -f *.o bfint

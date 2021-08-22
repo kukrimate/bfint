@@ -1,6 +1,5 @@
-;;
-; Brainfuck interpreter in x86_64 assembly for Linux
-;;
+; SPDX-License-Identifier: ISC
+; bfint.asm: brainfuck interpreter
 
 ; AMD64 ABI
 ;  Arguments (syscall): RDI, RSI, RDX, R10, R8, R9
@@ -8,17 +7,51 @@
 ;  Return:              RAX
 ;  Untouched registers: RBX, RBP, R12, R13, R14, R15
 
-%include "syscall.inc"
+%include "lib.inc"
 extern perror
 extern puts
+
+section .bss
+
+BUFSIZE equ 4096        ; Output buffer size
+
+align 16
+outbuf: resb BUFSIZE    ; Output buffer
+outidx: resd 1          ; Output index
+
+section .data
 
 section .text
 
 %define TAPE_LENGTH 0xa000
 
-;;
+; void putchar(u8 ch)
+putchar:
+    mov eax, [outidx]
+    ; Append char
+    mov byte [outbuf + eax], dil
+    inc eax
+    ; Check for newline
+    cmp dil, 10 ; \n
+    je .flush
+    ; Check if buffer is full
+    cmp eax, BUFSIZE
+    jl .done
+.flush:
+    ; Flush buffer
+    mov edi, 1
+    mov rsi, outbuf
+    mov edx, eax
+    sys_write
+    ; Reset counter
+    xor eax, eax
+    mov [outidx], eax
+.done:
+    ; Save size and return
+    mov [outidx], eax
+    ret
+
 ; i64 interpret(u8 *prog, u64 prog_len)
-;;
 interpret:
 
 ; save callee saved registers
@@ -61,11 +94,8 @@ jl .zero_loop
 mov bl, [r14]
 
 ; print current instruction
-; movzx rax, bl
-; push rax
-; mov rdi, rsp
-; call puts
-; pop rax
+; movzx rdi, bl
+; call putchar
 
 ;
 ; Instruction: >
@@ -114,11 +144,8 @@ jmp .insn_end
 cmp bl, '.' ; print cell
 jne .insn_5
 
-movzx rax, byte [r13]
-push rax
-mov rdi, rsp
-call puts
-pop rax
+movzx rdi, byte [r13]
+call putchar
 
 jmp .insn_end
 
@@ -209,6 +236,10 @@ jl .loop_exec
 
 ; .done:
 
+; print newline to make sure buffer is flushed
+mov edi, 10 ; \n
+call putchar
+
 ; return 0
 xor rax, rax
 .end:
@@ -298,4 +329,4 @@ sys_exit
 
 section .rodata
 
-msg_usage    db 'Usage: bfint PROGRAM',0xa,0
+msg_usage db 'Usage: bfint PROGRAM',0xa,0

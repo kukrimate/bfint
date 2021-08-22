@@ -1,8 +1,7 @@
-;;
-; Errno handling by hand, because muh libc
-;;
-%include "errno.inc"
-extern puts
+; SPDX-License-Identifier: ISC
+; lib.inc: Library routines
+
+%include "lib.inc"
 
 section .text
 
@@ -27,6 +26,35 @@ cmovge rsi, rax
 mov rdi, [err_strings + rsi * 8]
 call puts
 ret
+
+;;
+; u64 strlen(u8 *str)
+;;
+extern strlen
+strlen:
+xor rax, rax
+nextloop:
+cmp byte [rdi], 0
+jz endloop
+inc rdi
+inc rax
+jmp nextloop
+endloop:
+ret
+
+;;
+; void puts(u8 *str)
+;;
+extern puts
+puts:
+push rdi
+call strlen
+mov rdi, 1
+pop rsi
+mov rdx, rax
+sys_write
+ret
+
 
 section .rodata
 
