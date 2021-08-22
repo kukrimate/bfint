@@ -13,90 +13,38 @@ extern puts
 
 section .bss
 
-BUFSIZE equ 4096        ; Output buffer size
-
+TAPESIZE equ 65536
 align 16
-outbuf: resb BUFSIZE    ; Output buffer
-outidx: resd 1          ; Output index
+tape resb TAPESIZE
 
-section .data
+BUFSIZE equ 4096    ; Output buffer size
+align 16
+outbuf resb BUFSIZE ; Output buffer
 
 section .text
-
-%define TAPE_LENGTH 0xa000
-
-; void putchar(u8 ch)
-putchar:
-    mov eax, [outidx]
-    ; Append char
-    mov byte [outbuf + eax], dil
-    inc eax
-    ; Check for newline
-    cmp dil, 10 ; \n
-    je .flush
-    ; Check if buffer is full
-    cmp eax, BUFSIZE
-    jl .done
-.flush:
-    ; Flush buffer
-    mov edi, 1
-    mov rsi, outbuf
-    mov edx, eax
-    sys_write
-    ; Reset counter
-    xor eax, eax
-    mov [outidx], eax
-.done:
-    ; Save size and return
-    mov [outidx], eax
-    ret
 
 ; i64 interpret(u8 *prog, u64 prog_len)
 interpret:
 
 ; save callee saved registers
 push rbx ; u8  ir
-push r12
+push r12 ; u64 outidx
 push r13 ; u8 *tape_ptr
 push r14 ; u8 *prog_ptr
 push r15 ; u8 *prog_endptr
 
 mov rbp, rsp
 
-; program
+; tape pointer
+mov r13, tape
+
+; program pointers
 mov r14, rdi
 lea r15, [rdi + rsi]
-
-; mmap tape
-mov rdi, 0                           ; addr
-mov rsi, TAPE_LENGTH                 ; len
-mov rdx, PROT_READ | PROT_WRITE      ; prot
-mov r10, MAP_PRIVATE | MAP_ANONYMOUS ; flags
-mov r8, -1                           ; fd
-sys_mmap
-test rax, rax
-jl .end
-
-; tape
-mov r13, rax
-
-; zero tape
-lea rcx, [rax + TAPE_LENGTH]
-.zero_loop:
-mov qword [rax], 0
-add rax, 8
-cmp rax, rcx
-jl .zero_loop
 
 ; execution loop
 .loop_exec:
 mov bl, [r14]
-
-; print current instruction
-; movzx rdi, bl
-; call putchar
-; mov edi, 10
-; call putchar
 
 ;
 ; Instruction: >
@@ -144,11 +92,27 @@ jmp .insn_end
 .insn_4:
 cmp bl, '.' ; print cell
 jne .insn_5
+    ; Save char to buffer
+    mov bl, [r13]
+    mov byte [outbuf+r12], bl
+    inc r12
 
-movzx rdi, byte [r13]
-call putchar
+    ; Flush on EOL
+    cmp bl, 10
+    je .flush
 
-jmp .insn_end
+    ; Flush on full
+    cmp eax, BUFSIZE
+    jl .insn_end
+
+.flush:
+    mov edi, 1
+    mov rsi, outbuf
+    mov edx, r12d
+    sys_write
+    xor r12, r12
+
+    jmp .insn_end
 
 ;
 ; Instruction: ,
@@ -177,22 +141,23 @@ jne .insn_7
 .skip:
     ; Setup nesting counter
     mov eax, 1
-    .i6loop:
+.skipl:
     inc r14
     mov bl, byte [r14]
     ; Increase nesting level on [
     cmp bl, '['
-    jne .i6loop1
+    jne .skipl1
     inc eax
-    .i6loop1:
+    jmp .skipl2
+.skipl1:
     ; Decrease nesting level on [
     cmp bl, ']'
-    jne .i6loop2
+    jne .skipl2
     dec eax
-    .i6loop2:
+.skipl2:
     ; Loop if still nested
     test eax, eax
-    jnz .i6loop
+    jnz .skipl
 
     jmp .insn_end
 
@@ -204,28 +169,30 @@ cmp bl, ']' ; jump to [ if cell is non-zero
 jne .insn_end
     ; Check data
     cmp byte [r13], 0
-    jnz .i7jump
+    jnz .do_jump
     ; Remove target from stack
     add rsp, 8
     jmp .insn_end
     ; Perform jump if data is non-zero
-.i7jump:
+.do_jump:
     mov r14, [rsp]
 
 ; End of instruction
 .insn_end:
 
+; Move to next instruction
 inc r14
 cmp r14, r15
 jl .loop_exec
 
-; print newline to make sure buffer is flushed
-mov edi, 10 ; \n
-call putchar
+; Flush buffer
+mov edi, 1
+mov rsi, outbuf
+mov edx, r12d
+sys_write
 
 ; return 0
 xor rax, rax
-.end:
 
 ; restore callee-saved registers
 mov rsp, rbp
