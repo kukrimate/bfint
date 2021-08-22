@@ -56,11 +56,12 @@ interpret:
 
 ; save callee saved registers
 push rbx ; u8  ir
-push rbp ; u64 counter
 push r12
 push r13 ; u8 *tape_ptr
 push r14 ; u8 *prog_ptr
 push r15 ; u8 *prog_endptr
+
+mov rbp, rsp
 
 ; program
 mov r14, rdi
@@ -87,14 +88,14 @@ add rax, 8
 cmp rax, rcx
 jl .zero_loop
 
-; xor rbp, rbp
-
 ; execution loop
 .loop_exec:
 mov bl, [r14]
 
 ; print current instruction
 ; movzx rdi, bl
+; call putchar
+; mov edi, 10
 ; call putchar
 
 ;
@@ -134,7 +135,7 @@ jmp .insn_end
 cmp bl, '-' ; decrease cell
 jne .insn_4
 
-dec byte[r13]
+dec byte [r13]
 jmp .insn_end
 
 ;
@@ -165,31 +166,35 @@ jmp .insn_end
 .insn_6:
 cmp bl, '[' ; jump to ] if cell is zero
 jne .insn_7
+    ; Skip loop if data is zero
+    cmp byte [r13], 0
+    jz .skip
 
-cmp byte [r13], 0
-jne .insn_end
+    ; Otherwise save jump target
+    push r14
+    jmp .insn_end
 
-xor rax, rax
-inc rax
+.skip:
+    ; Setup nesting counter
+    mov eax, 1
+    .i6loop:
+    inc r14
+    mov bl, byte [r14]
+    ; Increase nesting level on [
+    cmp bl, '['
+    jne .i6loop1
+    inc eax
+    .i6loop1:
+    ; Decrease nesting level on [
+    cmp bl, ']'
+    jne .i6loop2
+    dec eax
+    .i6loop2:
+    ; Loop if still nested
+    test eax, eax
+    jnz .i6loop
 
-.i6loop:
-inc r14
-mov bl, byte [r14]
-
-cmp bl, '['
-jne .i6loop1
-inc rax
-.i6loop1:
-
-cmp bl, ']'
-jne .i6loop2
-dec rax
-.i6loop2:
-
-test rax, rax
-jnz .i6loop
-
-jmp .insn_end
+    jmp .insn_end
 
 ;
 ; Instruction: ]
@@ -197,44 +202,22 @@ jmp .insn_end
 .insn_7:
 cmp bl, ']' ; jump to [ if cell is non-zero
 jne .insn_end
-
-cmp byte [r13], 0
-je .insn_end
-
-xor rax, rax
-inc rax
-
-.i7loop:
-dec r14
-mov bl, byte [r14]
-
-cmp bl, ']'
-jne .i7loop1
-inc rax
-.i7loop1:
-
-cmp bl, '['
-jne .i7loop2
-dec rax
-.i7loop2:
-
-test rax, rax
-jnz .i7loop
-
-;jmp .insn_end
+    ; Check data
+    cmp byte [r13], 0
+    jnz .i7jump
+    ; Remove target from stack
+    add rsp, 8
+    jmp .insn_end
+    ; Perform jump if data is non-zero
+.i7jump:
+    mov r14, [rsp]
 
 ; End of instruction
 .insn_end:
 
-; inc rbp
-; cmp rbp, 1000000000
-; jge .done
-
 inc r14
 cmp r14, r15
 jl .loop_exec
-
-; .done:
 
 ; print newline to make sure buffer is flushed
 mov edi, 10 ; \n
@@ -245,11 +228,12 @@ xor rax, rax
 .end:
 
 ; restore callee-saved registers
+mov rsp, rbp
+
 pop r15
 pop r14
 pop r13
 pop r12
-pop rbp
 pop rbx
 
 ret
